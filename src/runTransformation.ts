@@ -8,7 +8,7 @@ import type { SFCDescriptor } from './sfcUtils'
 
 import VueTransformation from './VueTransformation'
 
-const debug = createDebug('vue-codemod')
+const debug = createDebug('vue-codemod:run')
 
 type FileInfo = {
   path: string
@@ -30,10 +30,12 @@ type JSTransformationModule =
 type VueTransformationModule =
   | VueTransformation
   | {
-      default: VueTransformation,
+      default: VueTransformation
     }
 
-type TransformationModule = JSTransformationModule | VueTransformationModule
+export type TransformationModule =
+  | JSTransformationModule
+  | VueTransformationModule
 
 export default function runTransformation(
   fileInfo: FileInfo,
@@ -50,26 +52,68 @@ export default function runTransformation(
     transformation = transformationModule
   }
 
+  const { path, source } = fileInfo
+  const extension = (/\.([^.]*)$/.exec(path) || [])[0]
+  let lang = extension.slice(1)
+  let descriptor: SFCDescriptor
+
   if (transformation.type === 'vueTransformation') {
-    debug('TODO: Running VueTransformation')
+    if (extension === '.vue') {
+      descriptor = parseSFC(source, { filename: path }).descriptor
+    } else {
+      // skip non .vue files
+      return source
+    }
+
+    // skip .vue files without template block
+    if (!descriptor.template) {
+      debug('skip .vue files without template block.')
+      return source
+    }
+    let contentStart: number =
+      descriptor.template.ast.children[0].loc.start.offset
+    let contentEnd: number =
+      descriptor.template.ast.children[
+        descriptor.template.ast.children.length - 1
+      ].loc.end.offset + 1
+    let astStart = descriptor.template.ast.loc.start.offset
+    let astEnd = descriptor.template.ast.loc.end.offset + 1
+
+    fileInfo.source = descriptor.template.ast.loc.source
 
     const out = transformation(fileInfo, params)
+
+    if (!out) {
+      return source
+    }
+
+    // need to reconstruct the .vue file from descriptor blocks
+    if (extension === '.vue') {
+      if (out === descriptor!.template!.content) {
+        return source // skipped, don't bother re-stringifying
+      }
+      // remove redundant <template> tag
+      descriptor!.template!.content = out.slice(
+        contentStart - astStart,
+        contentEnd - astEnd
+      )
+      return stringifySFC(descriptor!)
+    }
+
     return out
   } else {
     debug('Running jscodeshift transform')
 
-    const { path, source } = fileInfo
-    const extension = (/\.([^.]*)$/.exec(path) || [])[0]
-    let lang = extension.slice(1)
-
-    let descriptor: SFCDescriptor
     if (extension === '.vue') {
       descriptor = parseSFC(source, { filename: path }).descriptor
 
       // skip .vue files without script block
       if (!descriptor.script) {
+        debug('skip .vue files without script block.')
         return source
       }
+
+      global.scriptLine = descriptor.script.loc.start.line
 
       lang = descriptor.script.lang || 'js'
       fileInfo.source = descriptor.script.content
@@ -96,7 +140,7 @@ export default function runTransformation(
       j,
       jscodeshift: j,
       stats: () => {},
-      report: () => {},
+      report: () => {}
     }
 
     const out = transformation(fileInfo, api, params)

@@ -1,39 +1,34 @@
 import wrap from '../src/wrapAstTransformation'
 import type { ASTTransformation } from '../src/wrapAstTransformation'
+import { getCntFunc } from '../src/report'
 
 export const transformAST: ASTTransformation = ({ root, j }) => {
-//  find the createApp()
-  const appDeclare = root.find(j.VariableDeclarator, {
-    id: { type: 'Identifier' },
-    init: {
-      type: 'CallExpression',
-      callee: {
-        object: {
-          name: 'Vue'
-        },
-        property: {
-          name: 'createApp'
-        }
-      }
+  const cntFunc = getCntFunc('global-filter', global.outputReport)
+  // find the createApp()
+  const constApp = root.find(j.VariableDeclarator, {
+    id: {
+      name: 'app'
     }
   })
-
-  if (!appDeclare.length) {
-    //dont transform new Vue(...) => Vue.createApp(...)?
-    const newVue = root.find(j.NewExpression, {
-      callee: {
-        type: 'Identifier',
-        name: 'Vue'
-      }
-    })
-
-    // need to transform global-filter first
-    if (newVue.length) {
-      console.warn('please transform new-global-api before transform global-filter!')
-    }
+  if (constApp.length <= 0) {
     return
   }
-  const appName = appDeclare.at(0).get().node.id.name
+  const vueCreateApp = j(constApp?.at(0).get().value.init).find(
+    j.MemberExpression,
+    {
+      object: {
+        name: 'Vue'
+      },
+      property: {
+        name: 'createApp'
+      }
+    }
+  )
+
+  if (!constApp.length || !vueCreateApp.length) {
+    return
+  }
+  const appName = constApp.at(0).get().value.id.name
 
   // Vue.filter('filterName', function(value) {}) =>
   // app.config.globalProperties.$filters = { filterName(value) {} }
@@ -51,6 +46,7 @@ export const transformAST: ASTTransformation = ({ root, j }) => {
     return
   }
 
+  cntFunc()
   const methods = []
   for (let i = 0; i < filters.length; i++) {
     const filter = filters.at(i)

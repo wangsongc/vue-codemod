@@ -20,7 +20,14 @@ const router = new VueRouter({
 });
 
 new VueRouter({
-  routes
+  routes,
+  fallback: false
+});
+
+router.beforeEach((to,from, next) => {
+  if(from === VueRouter.START_LOCATION){
+    next('/motomo');
+  }
 });
 
 export default router;

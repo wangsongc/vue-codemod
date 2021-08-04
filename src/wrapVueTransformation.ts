@@ -1,6 +1,8 @@
-import * as _ from 'lodash'
 import type { Operation } from './operationUtils'
 import type VueTransformation from './VueTransformation'
+import { Node } from 'vue-eslint-parser/ast/nodes'
+import * as parser from 'vue-eslint-parser'
+import { getCntFunc } from './report'
 
 const BOM = '\uFEFF'
 
@@ -10,12 +12,56 @@ type FileInfo = {
 }
 
 export type Context = {
-  file: FileInfo,
+  file: FileInfo
 }
 
 export type VueASTTransformation<Params = void> = {
-  (context: Context, params: Params): Operation[],
+  (context: Context, params: Params): Operation[]
   type?: string
+}
+
+export function createTransformAST(
+  nodeFilter: (node: Node) => boolean,
+  fix: (node: Node, source?: string) => Operation[],
+  ruleName: string
+) {
+  function findNodes(context: any): Node[] {
+    const { file } = context
+    const source = file.source
+    const options = { sourceType: 'module' }
+    const ast = parser.parse(source, options)
+    let toFixNodes: Node[] = []
+    let root: Node = <Node>ast.templateBody
+
+    parser.AST.traverseNodes(root, {
+      enterNode(node: Node) {
+        if (nodeFilter(node)) {
+          toFixNodes.push(node)
+        }
+      },
+      leaveNode(node: Node) {}
+    })
+
+    return toFixNodes
+  }
+
+  const transformAST: VueASTTransformation = context => {
+    const cntFunc = getCntFunc(ruleName, global.outputReport)
+    let fixOperations: Operation[] = []
+    const { file } = context
+    const source = file.source
+    const toFixNodes: Node[] = findNodes(context)
+    toFixNodes.forEach(node => {
+      const operations = fix(node, source)
+      if (operations.length) {
+        cntFunc()
+        fixOperations = fixOperations.concat(operations)
+      }
+    })
+    return fixOperations
+  }
+
+  return transformAST
 }
 
 export default function astTransformationToVueTransformationModule<
@@ -28,7 +74,7 @@ export default function astTransformationToVueTransformationModule<
     return applyOperation(source, fixOperations)
   }
 
-  transform.type = "vueTransformation"
+  transform.type = 'vueTransformation'
 
   return transform
 }
@@ -38,14 +84,17 @@ export default function astTransformationToVueTransformationModule<
  * @param sourceCode File's source code
  * @param tempOperations Modify the object
  */
-export function applyOperation(sourceCode: string, tempOperations: Operation[]) {
+export function applyOperation(
+  sourceCode: string,
+  tempOperations: Operation[]
+) {
   // clone the array
-  const bom = sourceCode.startsWith(BOM) ? BOM : "",
-    text: string = bom ? sourceCode.slice(1) : sourceCode;
+  const bom = sourceCode.startsWith(BOM) ? BOM : '',
+    text: string = bom ? sourceCode.slice(1) : sourceCode
   let lastPos: number = Number.MIN_VALUE,
-    output: string = bom;
+    output: string = bom
 
-  let applyOperations: Operation[] = [];
+  let applyOperations: Operation[] = []
 
   // The Lodash grouping function is called to group the objects in the array according to range
   let tempOperation: Operation | null = mergeOperations(tempOperations, text)
@@ -54,13 +103,13 @@ export function applyOperation(sourceCode: string, tempOperations: Operation[]) 
   }
 
   for (const operation of applyOperations.sort(compareOperationsByRange)) {
-    attemptOperation(operation);
+    attemptOperation(operation)
   }
 
   // all fix were recovered.
-  output += text.slice(Math.max(0, lastPos));
+  output += text.slice(Math.max(0, lastPos))
 
-  return output;
+  return output
 
   /**
    * Try to use the 'operation' from a problem.
@@ -68,11 +117,11 @@ export function applyOperation(sourceCode: string, tempOperations: Operation[]) 
    * @returns {boolean}         Whether operation was successfully applied
    */
   function attemptOperation(operation: Operation) {
-    const start = operation.range[0];
-    const end = operation.range[1];
+    const start = operation.range[0]
+    const end = operation.range[1]
     // Remain it as a problem if it's overlapped or it's a negative range
     if (lastPos >= start || start > end) {
-      return false;
+      return false
     }
 
     // Remove BOM.
@@ -80,52 +129,58 @@ export function applyOperation(sourceCode: string, tempOperations: Operation[]) 
       (start < 0 && end >= 0) ||
       (start === 0 && operation.text.startsWith(BOM))
     ) {
-      output = "";
+      output = ''
     }
 
     // Make output to this operation.
-    output += text.slice(Math.max(0, lastPos), Math.max(0, start));
-    output += operation.text;
-    lastPos = end;
-    return true;
+    output += text.slice(Math.max(0, lastPos), Math.max(0, start))
+    output += operation.text
+    lastPos = end
+    return true
   }
 }
 
 /**
-   * Merges the given operations array into one.
-   * @param {Operation[]} operations The operations to merge.
-   * @param {SourceCode} sourceCode The source code object to get the text between operations.
-   * @returns {{text: string, range: number[]}} The merged operations
-   */
-function mergeOperations(operations: Operation[], sourceCode: String): Operation | null {
+ * Merges the given operations array into one.
+ * @param {Operation[]} operations The operations to merge.
+ * @param {SourceCode} sourceCode The source code object to get the text between operations.
+ * @returns {{text: string, range: number[]}} The merged operations
+ */
+function mergeOperations(
+  operations: Operation[],
+  sourceCode: String
+): Operation | null {
   if (operations.length === 0) {
-    return null;
+    return null
   }
   if (operations.length === 1) {
-    return operations[0];
+    return operations[0]
   }
 
-  operations.sort(compareOperationsByRange);
+  operations.sort(compareOperationsByRange)
 
-  const originalText = sourceCode;
-  const start = operations[0].range[0];
-  const end = operations[operations.length - 1].range[1];
-  let text: string = "";
-  let lastPos: number = Number.MIN_SAFE_INTEGER;
+  const originalText = sourceCode
+  const start = operations[0].range[0]
+  const end = operations[operations.length - 1].range[1]
+  let text: string = ''
+  let lastPos: number = Number.MIN_SAFE_INTEGER
 
   for (const operation of operations) {
     if (operation.range[0] < lastPos) {
-      continue;
+      continue
     }
 
     if (operation.range[0] >= 0) {
-      text += originalText.slice(Math.max(0, start, lastPos), operation.range[0]);
+      text += originalText.slice(
+        Math.max(0, start, lastPos),
+        operation.range[0]
+      )
     }
-    text += operation.text;
-    lastPos = operation.range[1];
+    text += operation.text
+    lastPos = operation.range[1]
   }
-  text += originalText.slice(Math.max(0, start, lastPos), end);
-  return { range: [start, end], text } as Operation;
+  text += originalText.slice(Math.max(0, start, lastPos), end)
+  return { range: [start, end], text } as Operation
 }
 
 /**
@@ -136,5 +191,5 @@ function mergeOperations(operations: Operation[], sourceCode: String): Operation
  * @private
  */
 function compareOperationsByRange(a: Operation, b: Operation): number {
-  return a.range[0] - b.range[0] || a.range[1] - b.range[1];
+  return a.range[0] - b.range[0] || a.range[1] - b.range[1]
 }

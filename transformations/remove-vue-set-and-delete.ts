@@ -6,10 +6,11 @@
 import wrap from '../src/wrapAstTransformation'
 import type { ASTTransformation } from '../src/wrapAstTransformation'
 import type * as N from 'jscodeshift'
+import { getCntFunc } from '../src/report'
 
-export const transformAST: ASTTransformation = (context) => {
+export const transformAST: ASTTransformation = context => {
   const { root, j } = context
-
+  const cntFunc = getCntFunc('remove-vue-set-and-delete', global.outputReport)
   const isVue = (node: N.ASTNode) => {
     return j.Identifier.check(node) && node.name === 'Vue'
   }
@@ -40,7 +41,7 @@ export const transformAST: ASTTransformation = (context) => {
 
       return false
     })
-    .filter((path) => {
+    .filter(path => {
       const prop = (path.node.callee as N.MemberExpression)
         .property as N.Identifier
 
@@ -59,7 +60,7 @@ export const transformAST: ASTTransformation = (context) => {
         return false
       }
 
-      const decls = j(path).getVariableDeclarators((p) => obj.name)
+      const decls = j(path).getVariableDeclarators(p => obj.name)
       if (decls && decls.length === 1) {
         const declPath = decls.paths()[0]
         const declNode = declPath.node
@@ -77,13 +78,14 @@ export const transformAST: ASTTransformation = (context) => {
     })
 
   setOrDeleteCalls.replaceWith(({ node }) => {
-    if (node.arguments.some((arg) => j.SpreadElement.check(arg))) {
+    if (node.arguments.some(arg => j.SpreadElement.check(arg))) {
       // TODO: add a comment to inform the user that this kind of usage can't be transformed
       return node
     }
 
     const prop = (node.callee as N.MemberExpression).property as N.Identifier
     if (prop.name === '$set' || prop.name === 'set') {
+      cntFunc()
       return j.assignmentExpression(
         '=',
         // @ts-ignore
@@ -94,6 +96,7 @@ export const transformAST: ASTTransformation = (context) => {
     }
 
     if (prop.name === '$delete' || prop.name === 'delete') {
+      cntFunc()
       return j.unaryExpression(
         'delete',
         // @ts-ignore

@@ -1,64 +1,85 @@
 import { Node } from 'vue-eslint-parser/ast/nodes'
 import * as OperationUtils from '../src/operationUtils'
 import type { Operation } from '../src/operationUtils'
-import type { VueASTTransformation } from '../src/wrapVueTransformation'
-import * as parser from 'vue-eslint-parser'
-import wrap from '../src/wrapVueTransformation'
+import {
+  default as wrap,
+  createTransformAST
+} from '../src/wrapVueTransformation'
 
-export const transformAST: VueASTTransformation = (context) => {
-  var fixOperations: Operation[] = []
-  const toFixNodes: Node[] = findNodes(context)
-  toFixNodes.forEach((node) => {
-    fixOperations = fixOperations.concat(fix(node))
-  })
-  return fixOperations
-}
+export const transformAST = createTransformAST(
+  nodeFilter,
+  fix,
+  'slot-attribute'
+)
 
 export default wrap(transformAST)
-/**
- * search slot attribute nodes
- *
- * @param context
- * @param templateBody
- * @returns slot attribute nodes
- */
-function findNodes(context: any): Node[] {
-  const { file } = context
-  const source = file.source
-  const options = { sourceType: 'module' }
-  const ast = parser.parse(source, options)
-  var toFixNodes: Node[] = []
-  var root: Node = <Node>ast.templateBody
-  parser.AST.traverseNodes(root, {
-    enterNode(node: Node) {
-      if (node.type === 'VAttribute' && node.key.name === 'slot') {
-        toFixNodes.push(node)
-      }
-    },
-    leaveNode(node: Node) {},
-  })
-  return toFixNodes
+
+function nodeFilter(node: Node): boolean {
+  // filter for slot attribute node
+  return node.type === 'VAttribute' && node.key.name === 'slot'
 }
+
 /**
  * fix logic
- * @param fixer
- * @param slotAttr
+ * @param node
  */
 function fix(node: Node): Operation[] {
-  var fixOperations: Operation[] = []
-
-  const target: any = node!.parent!.parent
+  let fixOperations: Operation[] = []
+  const element: any = node!.parent!.parent
   // @ts-ignore
   const slotValue: string = node!.value!.value
 
-  // remove v-slot:${slotValue}
-  fixOperations.push(OperationUtils.remove(node))
-  // add <template v-slot:${slotValue}>
-  fixOperations.push(
-    OperationUtils.insertTextBefore(target, `<template v-slot:${slotValue}>`)
-  )
-  // add </template>
-  fixOperations.push(OperationUtils.insertTextAfter(target, `</template>`))
+  if (
+    element != null &&
+    element != undefined &&
+    element.type == 'VElement' &&
+    element.name == 'template'
+  ) {
+    // template element replace slot="xxx" to v-slot:xxx
+    fixOperations.push(OperationUtils.replaceText(node, `v-slot:${slotValue}`))
+  } else {
+    // remove v-slot:${slotValue}
+    fixOperations.push(OperationUtils.remove(node))
+    // add <template v-slot:${slotValue}>
+
+    let elder: any = null
+    let hasSlotAttr: boolean = false
+    let tmp: any = element
+    // find template parent
+    while (elder == null && tmp != null) {
+      hasSlotAttr = false
+      tmp = tmp.parent
+      if (tmp == null || tmp.type != 'VElement' || tmp.name != 'template') {
+        continue
+      }
+
+      elder = element
+      tmp.startTag.attributes
+        .filter(
+          (attr: any) =>
+            attr.type === 'VAttribute' &&
+            attr.key.type === 'VIdentifier' &&
+            attr.key.name === 'slot'
+        )
+        .forEach((element: any) => {
+          hasSlotAttr = true
+        })
+      if (hasSlotAttr) {
+        break
+      }
+    }
+
+    if (!hasSlotAttr) {
+      fixOperations.push(
+        OperationUtils.insertTextBefore(
+          element,
+          `<template v-slot:${slotValue}>`
+        )
+      )
+      // add </template>
+      fixOperations.push(OperationUtils.insertTextAfter(element, `</template>`))
+    }
+  }
 
   return fixOperations
 }

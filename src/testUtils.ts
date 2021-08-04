@@ -3,6 +3,8 @@ jest.autoMockOff()
 import * as fs from 'fs'
 import * as path from 'path'
 import runTransformation from './runTransformation'
+import transformationMap from '../transformations'
+import vueTransformationMap from '../vue-transformations'
 
 export const runTest = (
   description: string,
@@ -32,11 +34,11 @@ export const runTest = (
 
     const fileInfo = {
       path: inputPath,
-      source: fs.readFileSync(inputPath).toString(),
+      source: fs.readFileSync(inputPath).toString()
     }
-    const transformation = require((transformationType == 'vue'
-      ? '../vue-transformations'
-      : '../wrapAstTransformation') + `/${transformationName}`)
+    const transformation = (
+      transformationType == 'vue' ? vueTransformationMap : transformationMap
+    )[transformationName]
     expect(runTransformation(fileInfo, transformation)).toEqual(
       fs.readFileSync(outputPath).toString()
     )

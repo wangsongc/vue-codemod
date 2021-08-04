@@ -4,30 +4,32 @@ import wrap from '../src/wrapAstTransformation'
 import type { ASTTransformation } from '../src/wrapAstTransformation'
 
 import { transformAST as addImport } from './add-import'
+import { getCntFunc } from '../src/report'
 
-export const transformAST: ASTTransformation = (context) => {
+export const transformAST: ASTTransformation = context => {
   const { root, j } = context
-  const renderFns = root.find(j.ObjectProperty, {
-    key: {
-      name: 'render',
-    },
-    value: {
-      type: 'ArrowFunctionExpression',
-    },
+  // stats
+  const cntFunc = getCntFunc('remove-contextual-h-from-render', subRules)
+  const renderFns = root.find(j.ObjectProperty, n => {
+    return (
+      n.key.name === 'render' &&
+      (n.value.type === 'ArrowFunctionExpression' ||
+        n.value.type === 'FunctionExpression')
+    )
   })
 
   const renderMethods = root.find(j.ObjectMethod, {
     key: {
-      name: 'render',
+      name: 'render'
     },
     params: (params: Array<any>) =>
-      j.Identifier.check(params[0]) && params[0].name === 'h',
+      j.Identifier.check(params[0]) && params[0].name === 'h'
   })
 
   if (renderFns.length || renderMethods.length) {
     addImport(context, {
       specifier: { type: 'named', imported: 'h' },
-      source: 'vue',
+      source: 'vue'
     })
 
     renderFns.forEach(({ node }) => {
@@ -37,6 +39,9 @@ export const transformAST: ASTTransformation = (context) => {
     renderMethods.forEach(({ node }) => {
       node.params.shift()
     })
+
+    // stats
+    cntFunc()
   }
 }
 

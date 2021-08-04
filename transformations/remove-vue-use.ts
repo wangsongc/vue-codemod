@@ -24,32 +24,34 @@ export const transformAST: ASTTransformation<Params> = (
     callee: {
       type: 'MemberExpression',
       object: {
-        name: 'Vue',
+        name: 'Vue'
       },
       property: {
-        name: 'use',
-      },
-    },
+        name: 'use'
+      }
+    }
   })
 
   const removedPlugins: string[] = []
-  const removableUseCalls = vueUseCalls.filter(({ node }) => {
-    if (j.Identifier.check(node.arguments[0])) {
-      const plugin = node.arguments[0].name
-      if (removablePlugins.includes(plugin)) {
-        removedPlugins.push(plugin)
-        return true
+  const removableUseCalls = vueUseCalls
+    .filter(path => path.parent.parent.value.type === 'Program')
+    .filter(({ node }) => {
+      if (j.Identifier.check(node.arguments[0])) {
+        const plugin = node.arguments[0].name
+        if (removablePlugins?.includes(plugin)) {
+          removedPlugins.push(plugin)
+          return true
+        }
       }
-    }
 
-    return false
-  })
+      return false
+    })
 
   removableUseCalls.remove()
 
-  removedPlugins.forEach((name) =>
+  removedPlugins.forEach(name =>
     removeExtraneousImport(context, {
-      localBinding: name,
+      localBinding: name
     })
   )
 }

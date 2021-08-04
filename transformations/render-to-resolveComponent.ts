@@ -1,17 +1,21 @@
 import wrap from '../src/wrapAstTransformation'
 import type { ASTTransformation } from '../src/wrapAstTransformation'
 import { transformAST as addImport } from './add-import'
+import { getCntFunc } from '../src/report'
 
-export const transformAST: ASTTransformation = (context) => {
-
+export const transformAST: ASTTransformation = context => {
   const { root, j } = context
+  const cntFunc = getCntFunc('render-to-resolveComponent', global.outputReport)
   // find render function
-  const renderCollections = root.find(j.ObjectMethod, node => {
-    return node.key.name === 'render'
-      && node.params.length === 1
-  })
-    .filter(nodePath => nodePath.parent.parent.node.type === 'ExportDefaultDeclaration')
-  if (!renderCollections) return
+  const renderCollections = root
+    .find(j.ObjectMethod, node => {
+      return node.key.name === 'render' && node.params.length === 1
+    })
+    .filter(
+      nodePath =>
+        nodePath.parent.parent.node.type === 'ExportDefaultDeclaration'
+    )
+  if (!renderCollections.length) return
 
   // add import
   addImport(context, {
@@ -25,19 +29,30 @@ export const transformAST: ASTTransformation = (context) => {
     // remove render function param
     node.params = []
     const callExpressionCollection = j(node).find(j.CallExpression, node => {
-      return node.callee.name === paramName
-        && node.arguments.length === 1
+      return node.callee.name === paramName && node.arguments.length === 1
     })
 
     if (!callExpressionCollection.length) return
-    //  find the component name
-    const componentName = callExpressionCollection.get(0).node.arguments[0].value
-    //  remove non-letter for complying variable name rules
+    cntFunc()
+    // find the component name
+    const componentName =
+      callExpressionCollection.get(0).node.arguments[0].value
+    // remove non-letter for complying variable name rules
     const componentVariableName = removeNonLetter(componentName)
-    callExpressionCollection.get(0).parent.insertBefore(j(`const ${componentVariableName} = resolveComponent('${componentName}')`).find(j.VariableDeclaration).get().node)
-    //  replace h('xxx') with resolveComponent('xxx')
-    // @ts-ignore
-    callExpressionCollection.replaceWith(nodePath => nodePath.node.callee.name = componentVariableName)
+    callExpressionCollection
+      .get(0)
+      .parent.insertBefore(
+        j(
+          `const ${componentVariableName} = resolveComponent('${componentName}')`
+        )
+          .find(j.VariableDeclaration)
+          .get().node
+      )
+    // replace h('xxx') with resolveComponent('xxx')
+    callExpressionCollection.replaceWith(
+      // @ts-ignore
+      nodePath => (nodePath.node.callee.name = componentVariableName)
+    )
   })
 }
 
@@ -47,15 +62,17 @@ export const transformAST: ASTTransformation = (context) => {
  * @param str
  */
 function removeNonLetter(str: string): string | undefined {
-
   if (str) {
     let returnValue: string = ''
     for (let i = 0; i < str.length; i++) {
       // letter
-      if ((str[i] >= 'a' && str[i] <= 'z') || (str[i] >= 'A' && str[i] <= 'Z')) {
+      if (
+        (str[i] >= 'a' && str[i] <= 'z') ||
+        (str[i] >= 'A' && str[i] <= 'Z')
+      ) {
         returnValue += str[i]
       } else {
-        //  non-letter , remove and uppercase the first letter after non-letter
+        // non-letter , remove and uppercase the first letter after non-letter
         i++
         if (str[i] >= 'a' && str[i] <= 'z') {
           returnValue += String.fromCharCode(str[i].charCodeAt(0) - 32)
